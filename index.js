@@ -1,31 +1,49 @@
 import fetch from 'node-fetch'; 
-import { JSDOM } from 'jsdom'
+import jsdom from 'jsdom'
+const { JSDOM } = jsdom;
 
-async function scrape()
-{
-	const html = await (await fetch('https://www.homedepot.com/p/Home-Decorators-Collection-Windlowe-61-in-W-x-22-in-D-x-35-in-H-Freestanding-Bath-Vanity-in-White-with-Carrara-White-Marble-Marble-Top-15101-VS61C-WT/303619013')).text()
+async function scrape(){
 
-  const { document } = new JSDOM(html).window
+  const url = new URL('https://www.lowes.com/pd/Whirlpool-24-5-cu-ft-4-Door-French-Door-Refrigerator-with-Ice-Maker-Fingerprint-Resistant-Stainless-Steel-ENERGY-STAR/1000257811')
 
-  //Amazon
-  //const elem = document.querySelector(".twister-plus-buying-options-price-data")
-
-  //HomeDepot
-  const elem = document.querySelector("#thd-helmet__script--productStructureData")
-
-  if (elem !== null){
-
-    //Amazon
-    //console.log(JSON.parse(elem.textContent)[0].priceAmount)
-  
-    //HomeDepot
-    console.log(JSON.parse(elem.textContent).offers.price)
-
+  const options = {
+    headers: {'User-Agent': 'Mozilla/5.0 (Windows NT 6.3; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/38.0.2125.111 Safari/537.36'}
   }
-  else{
-  
-    console.log('elem not found in html document')
-  
+
+	const html = await (await fetch(url, options)).text()
+
+  const virtualConsole = new jsdom.VirtualConsole();
+  const dom = new JSDOM(html, { virtualConsole });
+  const document = dom.window.document
+  //console.log(document)
+
+  var elem
+
+  switch(url.hostname) {
+
+    case 'www.amazon.com':
+      elem = document.querySelector(".twister-plus-buying-options-price-data")
+      if (elem != null)
+        console.log(JSON.parse(elem.textContent)[0].priceAmount)
+      else
+        console.log('elem not found in html document')
+      break
+      
+    case 'www.homedepot.com':
+      elem = document.querySelector("#thd-helmet__script--productStructureData")
+      if (elem != null)
+        console.log(JSON.parse(elem.textContent).offers.price)
+      else
+        console.log('elem not found in html document')
+      break
+    
+    case 'www.lowes.com':
+      elem = document.querySelector(".screen-reader")
+      if (elem != null)
+        console.log(elem.textContent)
+      else
+        console.log('elem not found in html document')
+      break
   }
 }
 
