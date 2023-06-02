@@ -1,0 +1,24 @@
+{
+  "type": "module",
+  "name": "price-monitor",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jeff94040/price-monitor.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/jeff94040/price-monitor/issues"
+  },
+  "homepage": "https://github.com/jeff94040/price-monitor#readme",
+  "dependencies": {
+    "jsdom": "^22.1.0",
+    "node-fetch": "^3.3.1"
+  }
+}
