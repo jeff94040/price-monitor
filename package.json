@@ -19,6 +19,7 @@
   "homepage": "https://github.com/jeff94040/price-monitor#readme",
   "dependencies": {
     "jsdom": "^22.1.0",
-    "node-fetch": "^3.3.1"
+    "node-fetch": "^3.3.1",
+    "puppeteer": "^20.9.0"
   }
 }
