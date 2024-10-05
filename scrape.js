@@ -1,46 +1,111 @@
-import puppeteer from "puppeteer";
+import crypto from 'crypto'
+import dotenv from 'dotenv';
+import puppeteer from "puppeteer"
+import mongoose from 'mongoose'
 
-const browser = await puppeteer.launch({headless: 'new'});
+dotenv.config()
 
-const page = await browser.newPage();
-
-//const url = new URL('https://www.amazon.com/dp/B092PN2C3M/ref=syn_sd_onsite_desktop_0?ie=UTF8&psc=1&pd_rd_plhdr=t')
+//const url = new URL('https://www.amazon.com/Monolith-THX-365IW-Certified-Neodymium-Shorting/dp/B07YLZ3R4T/ref=sr_1_1?crid=OQGA9VD0NQEQ&dib=eyJ2IjoiMSJ9.wcTrK6uPvvgqXpMZ70oj2mgcts5zyy4NJc0mDwg7LkQ.ImXL24hGLY6jgeFsbvcCVxpmz0BJl-mAcet_SLuOsFU&dib_tag=se&keywords=365iw&qid=1728138449&s=electronics&sprefix=365iw%2Celectronics%2C145&sr=1-1&ufe=INHOUSE_INSTALLMENTS%3AUS_IHI_5M_HARDLINES_AUTOMATED'.split('?')[0])
 //const url = new URL('https://www.crutchfield.com/p_537OS237BG/Salamander-Designs-Chameleon-Collection-Oslo-237.html')
 //const url = new URL('https://www.homedepot.com/p/Leviton-Decora-15-Amp-Single-Pole-Rocker-AC-Quiet-Light-Switch-White-10-Pack-M32-05601-2WM/202204204')
-const url = new URL('https://www.lowes.com/pd/Whirlpool-26-2-cu-ft-4-Door-French-Door-Refrigerator-with-Ice-Maker-Fingerprint-Resistant-Stainless-Steel/1000318967')
+//const url = new URL('https://www.lowes.com/pd/Whirlpool-26-2-cu-ft-4-Door-French-Door-Refrigerator-with-Ice-Maker-Fingerprint-Resistant-Stainless-Steel/1000318967')
 
-const hostname = url.hostname
+// close browser
 
-await page.goto(url.href, {waitUntil:"networkidle2"})
+// mongo database credentials
+const mongo_db_user = process.env.MONGO_DB_USER;
+const mongo_db_password = process.env.MONGO_DB_PASSWORD;
+const mongo_db_cluster_domain = process.env.MONGO_DB_CLUSTER_DOMAIN;
+const mongo_db_name = process.env.MONGO_DB_NAME;
 
-  // Get page data
-  const price = await page.evaluate(hostname => {
+// initialize database connection
+main().catch(err => console.log(err));
 
-    var elem
-
-    switch(hostname) {
-      case 'www.amazon.com':
-        elem = document.querySelector('.a-offscreen')
-        break
-
-      case 'www.crutchfield.com':
-        elem = document.querySelector(".price.js-price")
-        break
-
-      case 'www.homedepot.com':
-        elem = document.querySelector(".price-format__large.price-format__main-price")
-        break
-
-      case 'www.lowes.com':
-        elem = document.querySelector(".item-price-dollar")
-        break
-    }
-
-    return elem.textContent.trim()
+async function main(){
   
-  }, hostname);
+  await mongoose.connect(`mongodb+srv://${mongo_db_user}:${mongo_db_password}@${mongo_db_cluster_domain}/${mongo_db_name}`)
 
-console.log(`price: ${price}`);
+  const listingSchema = new mongoose.Schema({
+    _id: String,
+    email: String,
+    url: String,
+    currentPrice: Number,
+    highestPrice: Number,
+    highestPriceDate: String,
+    lowestPrice: Number,
+    lowestPriceDate: String,
+    active: Boolean
+  })
+  
+  const Listing = mongoose.model('Listing', listingSchema);
 
-// Close browser.
-await browser.close();
+  const date = new Date();
+  const formatter = new Intl.DateTimeFormat('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+  const formattedDate = formatter.format(date);
+    
+  const allListings = await Listing.find()
+
+  for(const element of allListings){
+
+    var price = await getPrice(new URL(element.url))
+
+    if (parseFloat(price) !== parseFloat(element.currentPrice)){
+
+      console.log(`price changed from ${element.currentPrice} to ${price}`)
+
+      element.currentPrice = parseFloat(price)
+      element.highestPrice = parseFloat(price) > parseFloat(element.highestPrice) ? parseFloat(price) : parseFloat(element.highestPrice)
+      element.highestPriceDate = parseFloat(price) > parseFloat(element.highestPrice) ? formattedDate : element.highestPriceDate
+      element.lowestPrice = parseFloat(price) < parseFloat(element.lowestPrice) ? parseFloat(price) : parseFloat(element.lowestPrice)
+      element.lowestPriceDate = parseFloat(price) < parseFloat(element.lowestPrice) ? formattedDate : element.highestPriceDate
+
+      await element.save()
+
+      /* send email notification */
+
+    }
+  }
+
+  mongoose.connection.close()
+
+}
+
+async function getPrice(url){
+
+  console.log(`url: ${url}`)
+
+  const hostname = url.hostname
+
+  const browser = await puppeteer.launch()
+  const page = await browser.newPage()
+  await page.goto(url.href)
+
+  var element
+  var price
+  
+  switch(hostname) {
+    case 'www.amazon.com':
+      await page.waitForSelector('.a-offscreen');
+      element = await page.$('.a-offscreen');
+      price = await element.evaluate(el => el.textContent.trim());
+      break
+  
+    case 'www.crutchfield.com':
+      await page.waitForSelector('.price.js-price');
+      element = await page.$('.price.js-price');
+      price = await element.evaluate(el => el.textContent.trim());
+      break
+  
+    case 'www.homedepot.com':
+      //elem = document.querySelector(".price-format__large.price-format__main-price")
+      break
+  
+    case 'www.lowes.com':
+      //elem = document.querySelector(".item-price-dollar")
+      break
+  }
+  await browser.close()
+
+  //console.log(`price: ${price}`)
+  return price.replace('$','')
+}
