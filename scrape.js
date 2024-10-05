@@ -1,7 +1,10 @@
 import crypto from 'crypto'
-import dotenv from 'dotenv';
-import puppeteer from "puppeteer"
+import dotenv from 'dotenv'
 import mongoose from 'mongoose'
+import nodemailer from 'nodemailer'
+import puppeteer from 'puppeteer'
+import {google} from 'googleapis'
+const OAuth2 = google.auth.OAuth2
 
 dotenv.config()
 
@@ -9,8 +12,6 @@ dotenv.config()
 //const url = new URL('https://www.crutchfield.com/p_537OS237BG/Salamander-Designs-Chameleon-Collection-Oslo-237.html')
 //const url = new URL('https://www.homedepot.com/p/Leviton-Decora-15-Amp-Single-Pole-Rocker-AC-Quiet-Light-Switch-White-10-Pack-M32-05601-2WM/202204204')
 //const url = new URL('https://www.lowes.com/pd/Whirlpool-26-2-cu-ft-4-Door-French-Door-Refrigerator-with-Ice-Maker-Fingerprint-Resistant-Stainless-Steel/1000318967')
-
-// close browser
 
 // mongo database credentials
 const mongo_db_user = process.env.MONGO_DB_USER;
@@ -53,15 +54,26 @@ async function main(){
 
       console.log(`price changed from ${element.currentPrice} to ${price}`)
 
-      element.currentPrice = parseFloat(price)
+      var previousPrice = element.currentPrice
+      //element.currentPrice = parseFloat(price)
       element.highestPrice = parseFloat(price) > parseFloat(element.highestPrice) ? parseFloat(price) : parseFloat(element.highestPrice)
       element.highestPriceDate = parseFloat(price) > parseFloat(element.highestPrice) ? formattedDate : element.highestPriceDate
       element.lowestPrice = parseFloat(price) < parseFloat(element.lowestPrice) ? parseFloat(price) : parseFloat(element.lowestPrice)
       element.lowestPriceDate = parseFloat(price) < parseFloat(element.lowestPrice) ? formattedDate : element.highestPriceDate
 
+      // save updated element
       await element.save()
 
-      /* send email notification */
+      // email options
+      const mailOptions = {
+        from: `Price Notifier <${process.env.EMAIL_ADDRESS}>`,
+        to: element.email,
+        subject: "Price Change Detected",
+        text: `URL: ${element.url}\nYesterday's Price: $${previousPrice}\nToday's Price: $${price}\nHighest Price: $${element.highestPrice} on ${element.highestPriceDate}\nLowest Price: $${element.lowestPrice} on ${element.lowestPriceDate}`
+      }          
+
+      // send email
+      sendMail(mailOptions)
 
     }
   }
@@ -109,3 +121,53 @@ async function getPrice(url){
   //console.log(`price: ${price}`)
   return price.replace('$','')
 }
+
+const createTransporter = async () => {
+  try {
+    const oauth2Client = new OAuth2(
+      process.env.OAUTH_CLIENT_ID,
+      process.env.OAUTH_CLIENT_SECRET,
+      "https://developers.google.com/oauthplayground"
+    );
+
+    oauth2Client.setCredentials({
+      refresh_token: process.env.OAUTH_REFRESH_TOKEN,
+    });
+
+    const accessToken = await new Promise((resolve, reject) => {
+      oauth2Client.getAccessToken((err, token) => {
+        if (err) {
+          console.log("*ERR: ", err)
+          reject();
+        }
+        resolve(token); 
+      });
+    });
+
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        type: "OAuth2",
+        user: process.env.EMAIL_ADDRESS,
+        accessToken,
+        clientId: process.env.OAUTH_CLIENT_ID,
+        clientSecret: process.env.OAUTH_CLIENT_SECRET,
+        refreshToken: process.env.OAUTH_REFRESH_TOKEN,
+      },
+    });
+    return transporter;
+  } 
+  catch (err) {
+    return err
+  }
+};
+
+const sendMail = async (mailOptions) => {
+  try {
+    let emailTransporter = await createTransporter();
+    await emailTransporter.sendMail(mailOptions);
+  }
+  catch (err) {
+    console.log("ERROR: ", err)
+  }
+};
