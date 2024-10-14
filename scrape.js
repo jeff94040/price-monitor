@@ -1,5 +1,4 @@
 import mongoose from 'mongoose'
-//import puppeteer from 'puppeteer'
 import { chromium } from 'playwright'
 import { sendMail } from './nodemailer.js'
 
@@ -51,10 +50,14 @@ async function main(){
 
       var previousPrice = element.currentPrice
       //element.currentPrice = parseFloat(price)
-      element.highestPrice = parseFloat(price) > parseFloat(element.highestPrice) ? parseFloat(price) : parseFloat(element.highestPrice)
-      element.highestPriceDate = parseFloat(price) > parseFloat(element.highestPrice) ? formattedDate : element.highestPriceDate
-      element.lowestPrice = parseFloat(price) < parseFloat(element.lowestPrice) ? parseFloat(price) : parseFloat(element.lowestPrice)
-      element.lowestPriceDate = parseFloat(price) < parseFloat(element.lowestPrice) ? formattedDate : element.highestPriceDate
+      if(parseFloat(price) > parseFloat(element.highestPrice)){
+        element.highestPrice = parseFloat(price)
+        element.highestPriceDate = formattedDate
+      }
+      if(parseFloat(price) < parseFloat(element.lowestPrice)){
+        element.lowestPrice = parseFloat(price)
+        element.lowestPriceDate = formattedDate
+      }
 
       // save updated element
       await element.save()
@@ -83,17 +86,6 @@ async function getPrice(url){
   console.log(`url: ${url}`)
 
   const hostname = url.hostname
-
-  /*
-  const browser = await puppeteer.launch({
-    args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox'
-    ]
-  })
-  const page = await browser.newPage()
-  await page.goto(url.href)
-*/
 
   // Launch a new browser instance
   const browser = await chromium.launch();
