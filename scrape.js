@@ -2,7 +2,6 @@ import mongoose from 'mongoose'
 import { chromium } from 'playwright'
 import { sendMail } from './nodemailer.js'
 
-//const url = new URL('https://www.amazon.com/Monolith-THX-365IW-Certified-Neodymium-Shorting/dp/B07YLZ3R4T/ref=sr_1_1?crid=OQGA9VD0NQEQ&dib=eyJ2IjoiMSJ9.wcTrK6uPvvgqXpMZ70oj2mgcts5zyy4NJc0mDwg7LkQ.ImXL24hGLY6jgeFsbvcCVxpmz0BJl-mAcet_SLuOsFU&dib_tag=se&keywords=365iw&qid=1728138449&s=electronics&sprefix=365iw%2Celectronics%2C145&sr=1-1&ufe=INHOUSE_INSTALLMENTS%3AUS_IHI_5M_HARDLINES_AUTOMATED'.split('?')[0])
 //const url = new URL('https://www.crutchfield.com/p_537OS237BG/Salamander-Designs-Chameleon-Collection-Oslo-237.html')
 //const url = new URL('https://www.homedepot.com/p/Leviton-Decora-15-Amp-Single-Pole-Rocker-AC-Quiet-Light-Switch-White-10-Pack-M32-05601-2WM/202204204')
 //const url = new URL('https://www.lowes.com/pd/Whirlpool-26-2-cu-ft-4-Door-French-Door-Refrigerator-with-Ice-Maker-Fingerprint-Resistant-Stainless-Steel/1000318967')
@@ -18,10 +17,11 @@ main().catch(err => console.log(err));
 
 async function main(){
   
+  // connect to database
   await mongoose.connect(`mongodb+srv://${mongo_db_user}:${mongo_db_password}@${mongo_db_cluster_domain}/${mongo_db_name}`)
 
+  // define database schema
   const listingSchema = new mongoose.Schema({
-    _id: String,
     email: String,
     url: String,
     currentPrice: Number,
@@ -32,48 +32,70 @@ async function main(){
     active: Boolean
   })
   
+  // define model
   const Listing = mongoose.model('listings', listingSchema);
 
+  // generate today's date
   const date = new Date();
   const formatter = new Intl.DateTimeFormat('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
   const formattedDate = formatter.format(date);
     
-  const allListings = await Listing.find()
+  // list of unique emails
+  const allEmails = await Listing.distinct('email')
 
-  for(const element of allListings){
+  // iterate through each unique email
+  for(const email of allEmails){
 
-    var price = await getPrice(new URL(element.url))
+    console.log(`email: ${email}`)
 
-    if (parseFloat(price) !== parseFloat(element.currentPrice)){
+    const allListingsPerEmail = await Listing.find({email: email}) // list of listings for this email
 
-      console.log(`price changed from ${element.currentPrice} to ${price}`)
+    let emailBody = '' // default email body to blank
 
-      var previousPrice = element.currentPrice
-      //element.currentPrice = parseFloat(price)
-      if(parseFloat(price) > parseFloat(element.highestPrice)){
-        element.highestPrice = parseFloat(price)
-        element.highestPriceDate = formattedDate
+    let triggerEmail = false // defaul to no email
+
+    // iterate through each listing for this email
+    for(const element of allListingsPerEmail){
+
+      console.log(`-checking url: ${element.url}`)
+      const price = await getPrice(new URL(element.url))
+
+      if (parseFloat(price) !== parseFloat(element.currentPrice)){
+
+        triggerEmail = true // switch to trigger email
+
+        console.log(`--price changed from ${element.currentPrice} to ${price}`)
+
+        const previousPrice = element.currentPrice
+        element.currentPrice = parseFloat(price)
+        if(parseFloat(price) > parseFloat(element.highestPrice)){
+          element.highestPrice = parseFloat(price)
+          element.highestPriceDate = formattedDate
+        }
+        if(parseFloat(price) < parseFloat(element.lowestPrice)){
+          element.lowestPrice = parseFloat(price)
+          element.lowestPriceDate = formattedDate
+        }
+
+        // save updated element
+        await element.save()
+
+        emailBody += `URL: ${element.url}\nYesterday's Price: $${previousPrice}\nToday's Price: $${price}\nHighest Price: $${element.highestPrice} on ${element.highestPriceDate}\nLowest Price: $${element.lowestPrice} on ${element.lowestPriceDate}\n\n`
+
       }
-      if(parseFloat(price) < parseFloat(element.lowestPrice)){
-        element.lowestPrice = parseFloat(price)
-        element.lowestPriceDate = formattedDate
-      }
-
-      // save updated element
-      await element.save()
-
-      // email options
-      const mailOptions = {
-        from: `Price Notifier <${process.env.EMAIL_ADDRESS}>`,
-        to: element.email,
-        subject: "Price Change Detected",
-        text: `URL: ${element.url}\nYesterday's Price: $${previousPrice}\nToday's Price: $${price}\nHighest Price: $${element.highestPrice} on ${element.highestPriceDate}\nLowest Price: $${element.lowestPrice} on ${element.lowestPriceDate}`
-      }          
-
-      // send email
-      sendMail(mailOptions)
-
     }
+
+    if(triggerEmail){
+      // send email
+      console.log(`-sending email to ${email}: ${emailBody.replaceAll('\n','')}\n`)
+      sendMail({
+        from: `Price Notifier <${process.env.EMAIL_ADDRESS}>`,
+        to: email,
+        subject: "Price Change Detected",
+        text: emailBody
+      })
+    }
+
   }
 
   // close database connection
@@ -82,8 +104,6 @@ async function main(){
 }
 
 async function getPrice(url){
-
-  console.log(`url: ${url}`)
 
   const hostname = url.hostname
 
@@ -94,8 +114,8 @@ async function getPrice(url){
   // Navigate to the desired webpage
   await page.goto(url.href);
 
-  var element
-  var price
+  let element
+  let price
   
   switch(hostname) {
     case 'www.amazon.com':
