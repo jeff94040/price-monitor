@@ -39,6 +39,7 @@ async function main(){
   const date = new Date();
   const formatter = new Intl.DateTimeFormat('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
   const formattedDate = formatter.format(date);
+  console.log(new Date().toLocaleString())
     
   // list of unique emails
   const allEmails = await Listing.distinct('email')
@@ -46,7 +47,7 @@ async function main(){
   // iterate through each unique email
   for(const email of allEmails){
 
-    console.log(`email: ${email}`)
+    console.log(`-email: ${email}`)
 
     const allListingsPerEmail = await Listing.find({email: email}) // list of listings for this email
 
@@ -57,14 +58,14 @@ async function main(){
     // iterate through each listing for this email
     for(const element of allListingsPerEmail){
 
-      console.log(`-checking url: ${element.url}`)
+      console.log(`--checking url: ${element.url}`)
       const price = await getPrice(new URL(element.url))
 
       if (parseFloat(price) !== parseFloat(element.currentPrice)){
 
         triggerEmail = true // switch to trigger email
 
-        console.log(`--price changed from ${element.currentPrice} to ${price}`)
+        console.log(`---price changed from ${element.currentPrice} to ${price}`)
 
         const previousPrice = element.currentPrice
         element.currentPrice = parseFloat(price)
@@ -87,7 +88,7 @@ async function main(){
 
     if(triggerEmail){
       // send email
-      console.log(`-sending email to ${email}: ${emailBody.replaceAll('\n','')}\n`)
+      console.log(`--sending email to ${email}: ${emailBody.replaceAll('\n','')}\n`)
       sendMail({
         from: `Price Notifier <${process.env.EMAIL_ADDRESS}>`,
         to: email,
