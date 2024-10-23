@@ -12,7 +12,6 @@ const mongo_db_password = process.env.MONGO_DB_PASSWORD;
 const mongo_db_cluster_domain = process.env.MONGO_DB_CLUSTER_DOMAIN;
 const mongo_db_name = process.env.MONGO_DB_NAME;
 
-// initialize database connection
 main().catch(err => console.log(err));
 
 async function main(){
@@ -35,10 +34,12 @@ async function main(){
   // define model
   const Listing = mongoose.model('listings', listingSchema);
 
-  // generate today's date
-  const date = new Date();
+  // launch a new browser instance
+  const browser = await chromium.launch();
+
+  // generate dates / timestamps
   const formatter = new Intl.DateTimeFormat('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
-  const formattedDate = formatter.format(date);
+  const formattedDate = formatter.format(new Date());
   console.log(new Date().toLocaleString())
     
   // list of unique emails
@@ -59,7 +60,7 @@ async function main(){
     for(const element of allListingsPerEmail){
 
       console.log(`--checking url: ${element.url}`)
-      const price = await getPrice(new URL(element.url))
+      const price = await getPrice(browser, new URL(element.url))
 
       if (parseFloat(price) !== parseFloat(element.currentPrice)){
 
@@ -84,7 +85,7 @@ async function main(){
         emailBody += `URL: ${element.url}\nYesterday's Price: $${previousPrice}\nToday's Price: $${price}\nHighest Price: $${element.highestPrice} on ${element.highestPriceDate}\nLowest Price: $${element.lowestPrice} on ${element.lowestPriceDate}\n\n`
 
       }
-    }
+    }// close listings per email loop
 
     if(triggerEmail){
       // send email
@@ -97,22 +98,23 @@ async function main(){
       })
     }
 
-  }
+  }// close per email loop
+
+  await browser.close()
 
   // close database connection
   mongoose.connection.close()
 
 }
 
-async function getPrice(url){
+async function getPrice(browser, url){
 
   const hostname = url.hostname
 
-  // Launch a new browser instance
-  const browser = await chromium.launch();
+  // create a new browser page
   const page = await browser.newPage();
 
-  // Navigate to the desired webpage
+  // return the main resource response
   await page.goto(url.href);
 
   let element
@@ -120,7 +122,6 @@ async function getPrice(url){
   
   switch(hostname) {
     case 'www.amazon.com':
-      // await page.waitForSelector('.a-offscreen');
       element = await page.$('.a-offscreen');
       price = await element.evaluate(el => el.textContent.trim());
       break
@@ -139,7 +140,6 @@ async function getPrice(url){
       //elem = document.querySelector(".item-price-dollar")
       break
   }
-  await browser.close()
 
   return price.replace('$','')
 }
