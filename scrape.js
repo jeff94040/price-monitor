@@ -2,10 +2,6 @@ import mongoose from 'mongoose'
 import { chromium } from 'playwright'
 import { sendMail } from './nodemailer.js'
 
-//const url = new URL('https://www.crutchfield.com/p_537OS237BG/Salamander-Designs-Chameleon-Collection-Oslo-237.html')
-//const url = new URL('https://www.homedepot.com/p/Leviton-Decora-15-Amp-Single-Pole-Rocker-AC-Quiet-Light-Switch-White-10-Pack-M32-05601-2WM/202204204')
-//const url = new URL('https://www.lowes.com/pd/Whirlpool-26-2-cu-ft-4-Door-French-Door-Refrigerator-with-Ice-Maker-Fingerprint-Resistant-Stainless-Steel/1000318967')
-
 // mongo database credentials
 const mongo_db_user = process.env.MONGO_DB_USER;
 const mongo_db_password = process.env.MONGO_DB_PASSWORD;
@@ -60,7 +56,9 @@ async function main(){
     for(const element of allListingsPerEmail){
 
       console.log(`--checking url: ${element.url}`)
-      const price = await getPrice(browser, new URL(element.url))
+      try{
+        const price = await getPrice(browser, new URL(element.url))
+
 
       if (parseFloat(price) !== parseFloat(element.currentPrice)){
 
@@ -82,9 +80,16 @@ async function main(){
         // save updated element
         await element.save()
 
-        emailBody += `URL: ${element.url}\nYesterday's Price: $${previousPrice}\nToday's Price: $${price}\nHighest Price: $${element.highestPrice} on ${element.highestPriceDate}\nLowest Price: $${element.lowestPrice} on ${element.lowestPriceDate}\n\n`
+        emailBody += `URL: ${element.url}\nPrice Change: $${previousPrice} => $${price}\nHighest Price: $${element.highestPrice} on ${element.highestPriceDate}\nLowest Price: $${element.lowestPrice} on ${element.lowestPriceDate}\n\n`
 
       }
+      else{
+        console.log(`---no price change ${element.currentPrice} to ${price}`)
+      }
+    }
+    catch (e){
+      console.log(e)
+    }
     }// close listings per email loop
 
     if(triggerEmail){
@@ -100,6 +105,7 @@ async function main(){
 
   }// close per email loop
 
+  // close browser
   await browser.close()
 
   // close database connection
@@ -118,18 +124,17 @@ async function getPrice(browser, url){
   await page.goto(url.href);
 
   let element
-  let price
+  //let price
   
   switch(hostname) {
     case 'www.amazon.com':
-      element = await page.$('.a-offscreen');
-      price = await element.evaluate(el => el.textContent.trim());
+      element = page.locator('.a-offscreen').first();
       break
   
     case 'www.crutchfield.com':
+      /*
       await page.waitForSelector('.price.js-price');
-      element = await page.$('.price.js-price');
-      price = await element.evaluate(el => el.textContent.trim());
+      */
       break
   
     case 'www.homedepot.com':
@@ -141,5 +146,7 @@ async function getPrice(browser, url){
       break
   }
 
-  return price.replace('$','')
+  await element.waitFor('attached');
+  const price = (await element.textContent()).trim().replace('$','')
+  return price
 }
