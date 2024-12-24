@@ -33,6 +33,7 @@ async function main(){
   // launch a new browser instance
   const browser = await chromium.launch();
 
+
   // generate dates / timestamps
   const formatter = new Intl.DateTimeFormat('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
   const formattedDate = formatter.format(new Date());
@@ -57,39 +58,40 @@ async function main(){
 
       console.log(`--checking url: ${element.url}`)
       try{
+
         const price = await getPrice(browser, new URL(element.url))
+        const floatPrice = parseFloat(price)
 
+        if (isFloat(price) && parseFloat(price) !== parseFloat(element.currentPrice)){
 
-      if (parseFloat(price) !== parseFloat(element.currentPrice)){
+          triggerEmail = true // switch to trigger email
 
-        triggerEmail = true // switch to trigger email
+          console.log(`---price changed from ${element.currentPrice} to ${price}`)
 
-        console.log(`---price changed from ${element.currentPrice} to ${price}`)
+          const previousPrice = element.currentPrice
+          element.currentPrice = parseFloat(price)
+          if(parseFloat(price) > parseFloat(element.highestPrice)){
+            element.highestPrice = parseFloat(price)
+            element.highestPriceDate = formattedDate
+          }
+          if(parseFloat(price) < parseFloat(element.lowestPrice)){
+            element.lowestPrice = parseFloat(price)
+            element.lowestPriceDate = formattedDate
+          }
 
-        const previousPrice = element.currentPrice
-        element.currentPrice = parseFloat(price)
-        if(parseFloat(price) > parseFloat(element.highestPrice)){
-          element.highestPrice = parseFloat(price)
-          element.highestPriceDate = formattedDate
+          // save updated element
+          await element.save()
+
+          emailBody += `URL: ${element.url}\nPrice Change: $${previousPrice} => $${price}\nHighest Price: $${element.highestPrice} on ${element.highestPriceDate}\nLowest Price: $${element.lowestPrice} on ${element.lowestPriceDate}\n\n`
+
         }
-        if(parseFloat(price) < parseFloat(element.lowestPrice)){
-          element.lowestPrice = parseFloat(price)
-          element.lowestPriceDate = formattedDate
+        else{
+          console.log(`---no price change from ${element.currentPrice}`)
         }
-
-        // save updated element
-        await element.save()
-
-        emailBody += `URL: ${element.url}\nPrice Change: $${previousPrice} => $${price}\nHighest Price: $${element.highestPrice} on ${element.highestPriceDate}\nLowest Price: $${element.lowestPrice} on ${element.lowestPriceDate}\n\n`
-
       }
-      else{
-        console.log(`---no price change ${element.currentPrice} to ${price}`)
+      catch (e){
+        console.log(e)
       }
-    }
-    catch (e){
-      console.log(e)
-    }
     }// close listings per email loop
 
     if(triggerEmail){
@@ -117,8 +119,13 @@ async function getPrice(browser, url){
 
   const hostname = url.hostname
 
+  // create a new context with User Agent
+  const context = await browser.newContext({
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+  })
+
   // create a new browser page
-  const page = await browser.newPage();
+  const page = await context.newPage();
 
   // return the main resource response
   await page.goto(url.href);
@@ -146,7 +153,18 @@ async function getPrice(browser, url){
       break
   }
 
-  await element.waitFor('attached');
+  try{
+    await element.waitFor('attached');
+  }
+  catch(e){
+    console.log('A Timeout Occurred')
+    console.log(await page.content())
+  }
   const price = (await element.textContent()).trim().replace('$','')
   return price
+}
+
+function isFloat(str) {
+  const num = parseFloat(str);
+  return !isNaN(num) && num.toString() === str;
 }
