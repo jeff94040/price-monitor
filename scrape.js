@@ -1,8 +1,9 @@
-import mongoose from 'mongoose'
-import { chromium } from 'playwright'
-import { sendMail } from './nodemailer.js'
+import mongoose from 'mongoose';
+import { chromium } from 'playwright';
+import { sendMail } from './nodemailer.js';
+import { getAmazonPrice } from './scrapers/amazon.js'; // <-- Amazon scraper module
 
-// mongo database credentials
+// MongoDB credentials
 const mongo_db_user = process.env.MONGO_DB_USER;
 const mongo_db_password = process.env.MONGO_DB_PASSWORD;
 const mongo_db_cluster_domain = process.env.MONGO_DB_CLUSTER_DOMAIN;
@@ -10,12 +11,11 @@ const mongo_db_name = process.env.MONGO_DB_NAME;
 
 main().catch(err => console.log(err));
 
-async function main(){
-  
-  // connect to database
-  await mongoose.connect(`mongodb+srv://${mongo_db_user}:${mongo_db_password}@${mongo_db_cluster_domain}/${mongo_db_name}`)
+async function main() {
+  // Connect to database
+  await mongoose.connect(`mongodb+srv://${mongo_db_user}:${mongo_db_password}@${mongo_db_cluster_domain}/${mongo_db_name}`);
 
-  // define database schema
+  // Define schema
   const listingSchema = new mongoose.Schema({
     email: String,
     url: String,
@@ -25,146 +25,111 @@ async function main(){
     lowestPrice: Number,
     lowestPriceDate: String,
     active: Boolean
-  })
-  
-  // define model
+  });
+
   const Listing = mongoose.model('listings', listingSchema);
 
-  // launch a new browser instance
-  const browser = await chromium.launch();
+  // Launch browser
+  const browser = await chromium.launch({ headless: true });
 
-
-  // generate dates / timestamps
   const formatter = new Intl.DateTimeFormat('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
   const formattedDate = formatter.format(new Date());
-  console.log(new Date().toLocaleString())
-    
-  // list of unique emails
-  const allEmails = await Listing.distinct('email')
+  console.log(new Date().toLocaleString());
 
-  // iterate through each unique email
-  for(const email of allEmails){
+  const allEmails = await Listing.distinct('email');
 
-    console.log(`-email: ${email}`)
+  for (const email of allEmails) {
+    console.log(`-email: ${email}`);
 
-    const allListingsPerEmail = await Listing.find({email: email}) // list of listings for this email
+    const allListingsPerEmail = await Listing.find({ email });
+    if (!allListingsPerEmail.length) continue;
 
-    let emailBody = '' // default email body to blank
+    let emailBody = '';
+    let triggerEmail = false;
 
-    let triggerEmail = false // defaul to no email
+    // Reuse one browser context per email
+    const context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7 AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36)'
+    });
 
-    // iterate through each listing for this email
-    for(const element of allListingsPerEmail){
+    for (const element of allListingsPerEmail) {
+      console.log(`--checking url: ${element.url}`);
 
-      console.log(`--checking url: ${element.url}`)
-      try{
+      const page = await context.newPage();
+      try {
+        const price = await getPrice(page, new URL(element.url));
 
-        const price = await getPrice(browser, new URL(element.url))
-        const floatPrice = parseFloat(price)
-
-        if (isFloat(price) && parseFloat(price) !== parseFloat(element.currentPrice)){
-
-          triggerEmail = true // switch to trigger email
-
-          console.log(`---price changed from ${element.currentPrice} to ${price}`)
-
-          const previousPrice = element.currentPrice
-          element.currentPrice = parseFloat(price)
-          if(parseFloat(price) > parseFloat(element.highestPrice)){
-            element.highestPrice = parseFloat(price)
-            element.highestPriceDate = formattedDate
-          }
-          if(parseFloat(price) < parseFloat(element.lowestPrice)){
-            element.lowestPrice = parseFloat(price)
-            element.lowestPriceDate = formattedDate
-          }
-
-          // save updated element
-          await element.save()
-
-          emailBody += `URL: ${element.url}\nPrice Change: $${previousPrice} => $${price}\nHighest Price: $${element.highestPrice} on ${element.highestPriceDate}\nLowest Price: $${element.lowestPrice} on ${element.lowestPriceDate}\n\n`
-
+        if (price === null) {
+          console.log('--- no price available (sold out or not found)');
+          continue;
         }
-        else{
-          console.log(`---no price change from ${element.currentPrice}`)
-        }
-      }
-      catch (e){
-        console.log(e)
-      }
-    }// close listings per email loop
 
-    if(triggerEmail){
-      // send email
-      console.log(`--sending email to ${email}: ${emailBody.replaceAll('\n','')}\n`)
+        if (price !== Number(element.currentPrice)) {
+          triggerEmail = true;
+          console.log(`---price changed from ${element.currentPrice} to ${price}`);
+
+          const previousPrice = element.currentPrice;
+          element.currentPrice = price;
+
+          if (price > Number(element.highestPrice)) {
+            element.highestPrice = price;
+            element.highestPriceDate = formattedDate;
+          }
+
+          if (price < Number(element.lowestPrice)) {
+            element.lowestPrice = price;
+            element.lowestPriceDate = formattedDate;
+          }
+
+          await element.save();
+
+          emailBody +=
+            `URL: ${element.url}\n` +
+            `Price Change: $${previousPrice} => $${price}\n` +
+            `Highest Price: $${element.highestPrice} on ${element.highestPriceDate}\n` +
+            `Lowest Price: $${element.lowestPrice} on ${element.lowestPriceDate}\n\n`;
+        } else {
+          console.log(`---no price change from ${element.currentPrice}`);
+        }
+
+      } catch (e) {
+        console.error('--- scrape error:', e.message);
+      } finally {
+        await page.close();
+      }
+    }
+
+    if (triggerEmail) {
+      console.log(`--sending email to ${email}`);
       sendMail({
         from: `Price Notifier <${process.env.EMAIL_ADDRESS}>`,
         to: email,
         subject: "Price Change Detected",
         text: emailBody
-      })
+      });
     }
 
-  }// close per email loop
+    // Close context per email
+    await context.close();
+  }
 
-  // close browser
-  await browser.close()
-
-  // close database connection
-  mongoose.connection.close()
-
+  await browser.close();
+  mongoose.connection.close();
 }
 
-async function getPrice(browser, url){
+//
+// ----------------------- GET PRICE -----------------------
+//
+async function getPrice(page, url) {
+  const hostname = url.hostname.toLowerCase();
 
-  const hostname = url.hostname
-
-  // create a new context with User Agent
-  const context = await browser.newContext({
-    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
-  })
-
-  // create a new browser page
-  const page = await context.newPage();
-
-  // return the main resource response
-  await page.goto(url.href);
-
-  let element
-  //let price
-  
-  switch(hostname) {
-    case 'www.amazon.com':
-      element = page.locator('.a-offscreen').first();
-      break
-  
-    case 'www.crutchfield.com':
-      /*
-      await page.waitForSelector('.price.js-price');
-      */
-      break
-  
-    case 'www.homedepot.com':
-      //elem = document.querySelector(".price-format__large.price-format__main-price")
-      break
-  
-    case 'www.lowes.com':
-      //elem = document.querySelector(".item-price-dollar")
-      break
+  if (hostname.includes('amazon.com')) {
+    return await getAmazonPrice(page, url);
   }
 
-  try{
-    await element.waitFor('attached');
-  }
-  catch(e){
-    console.log('A Timeout Occurred')
-    console.log(await page.content())
-  }
-  const price = (await element.textContent()).trim().replace('$','')
-  return price
-}
+  // Add other retailers here in the future:
+  // else if (hostname.includes('lowes.com')) { ... }
 
-function isFloat(str) {
-  const num = parseFloat(str);
-  return !isNaN(num) && num.toString() === str;
+  console.log(`--- unsupported hostname: ${hostname}`);
+  return null;
 }
