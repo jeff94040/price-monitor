@@ -19,6 +19,7 @@ async function main() {
   const listingSchema = new mongoose.Schema({
     email: String,
     url: String,
+    productTitle: String,            // <-- NEW
     currentPrice: Number,
     highestPrice: Number,
     highestPriceDate: String,
@@ -57,11 +58,19 @@ async function main() {
 
       const page = await context.newPage();
       try {
-        const price = await getPrice(page, new URL(element.url));
+        const result = await getPrice(page, new URL(element.url));
 
-        if (price === null) {
+        if (!result) {
           console.log('--- no price available (sold out or not found)');
           continue;
+        }
+
+        const { price, title } = result;
+
+        // Save product title if new or missing
+        if (title && (!element.productTitle || element.productTitle !== title)) {
+          element.productTitle = title;
+          await element.save();
         }
 
         if (price !== Number(element.currentPrice)) {
@@ -84,10 +93,12 @@ async function main() {
           await element.save();
 
           emailBody +=
+            `Product: ${element.productTitle || 'Unknown'}\n` +
             `URL: ${element.url}\n` +
             `Price Change: $${previousPrice} => $${price}\n` +
             `Highest Price: $${element.highestPrice} on ${element.highestPriceDate}\n` +
             `Lowest Price: $${element.lowestPrice} on ${element.lowestPriceDate}\n\n`;
+
         } else {
           console.log(`---no price change from ${element.currentPrice}`);
         }
@@ -124,11 +135,8 @@ async function getPrice(page, url) {
   const hostname = url.hostname.toLowerCase();
 
   if (hostname.includes('amazon.com')) {
-    return await getAmazonPrice(page, url);
+    return await getAmazonPrice(page, url);   // now returns { price, title }
   }
-
-  // Add other retailers here in the future:
-  // else if (hostname.includes('lowes.com')) { ... }
 
   console.log(`--- unsupported hostname: ${hostname}`);
   return null;

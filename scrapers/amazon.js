@@ -10,7 +10,18 @@ export async function getAmazonPrice(page, url) {
       return null;
     }
 
-    // List of price selectors (classic, deal, modern, apex layouts)
+    // ------------------ GET PRODUCT TITLE ------------------
+    let title = null;
+    try {
+      const titleLocator = page.locator('#productTitle').first();
+      if (await titleLocator.count()) {
+        title = (await titleLocator.textContent())?.trim();
+      }
+    } catch {
+      console.log('--- could not read product title');
+    }
+
+    // ------------------ GET PRICE ------------------
     const priceSelectors = [
       '#priceblock_ourprice',
       '#priceblock_dealprice',
@@ -37,7 +48,6 @@ export async function getAmazonPrice(page, url) {
       return null;
     }
 
-    // Normalize and parse
     const normalized = rawPrice.replace(/,/g, '');
     const match = normalized.match(/\d+(\.\d+)?/);
 
@@ -48,7 +58,12 @@ export async function getAmazonPrice(page, url) {
 
     const price = parseFloat(match[0]);
     console.log(`--- price detected: ${price}`);
-    return price;
+    if (title) console.log(`--- title detected: ${title}`);
+
+    return {
+      price,
+      title
+    };
 
   } catch (e) {
     console.error('--- getAmazonPrice error:', e.message);
